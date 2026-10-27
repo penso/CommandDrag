@@ -74,6 +74,18 @@ Interactive checks after installing and granting Accessibility permission:
 
 - `Sources/main.m`: menu, preferences, permissions, login item, hit-testing, and mouse handling.
 - `Sources/Info.plist`: app bundle metadata.
+- `Sources/CommandDrag.icns`: app icon for Finder and System Settings.
+- `Scripts/generate-icon.m`: native, reproducible icon artwork generator.
 - `build.sh`: compile and sign a local app bundle.
+
+To regenerate the icon (the normal build uses the checked-in icon):
+
+```sh
+mkdir -p build
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Cocoa Scripts/generate-icon.m -o build/generate-icon
+build/generate-icon
+iconutil -c icns build/CommandDrag.iconset -o Sources/CommandDrag.icns
+bash build.sh
+```
 
 To remove: disable Launch at Login, quit CommandDrag, delete `/Applications/CommandDrag.app`, and remove its Privacy & Security entries.
