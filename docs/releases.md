@@ -10,7 +10,9 @@ Release tags (`v1.0.0`, `v1.1.0-rc.1`, etc.) trigger a separate workflow that:
 2. Builds and signs a universal app with the hardened runtime and a secure timestamp.
 3. Submits it to Apple's notarization service and requires an accepted result.
 4. Staples and validates the notarization ticket, then checks Gatekeeper acceptance.
-5. Publishes `CommandDrag-vX.Y.Z-universal.zip` and `SHA256SUMS` to GitHub Releases.
+5. Packages a Finder window with the app, an `/Applications` symlink, and drag-to-install instructions.
+6. Signs, notarizes, and staples the DMG itself, then checks its Gatekeeper acceptance.
+7. Publishes `CommandDrag-vX.Y.Z-universal.dmg`, a ZIP alternative, and `SHA256SUMS` to GitHub Releases.
 
 Tags with a suffix create GitHub prereleases. The app's short version is the
 numeric `X.Y.Z`; its build number comes from the release workflow run number.
@@ -103,3 +105,30 @@ SIGN_IDENTITY='Developer ID Application: Fabien Penso (VJAHQVZ96V)' bash build.s
 
 Signing alone is not notarization. Use the release workflow to produce the
 stapled, notarized archive intended for downloads.
+
+## Build a DMG locally
+
+DMG packaging uses a few pinned Python build tools; these are not app runtime
+dependencies. Finder layout is written directly, so packaging also works on CI
+without AppleScript permissions or a running Finder session.
+
+```sh
+bash build.sh
+python3 -m venv build/dmg-venv
+build/dmg-venv/bin/python -m pip install -r Scripts/dmg-requirements.txt
+bash Scripts/package-dmg.sh
+```
+
+This produces `build/CommandDrag-universal.dmg`. The packaging script mounts the
+result read-only and verifies the Applications symlink, both CPU architectures,
+the app signature, and icon positions. A local DMG is not signed or notarized;
+the release workflow performs those steps using GitHub secrets.
+
+The layout lives in `Scripts/dmg-settings.py`. To regenerate its standard and
+Retina instruction backgrounds:
+
+```sh
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Cocoa \
+  Scripts/generate-dmg-background.m -o build/generate-dmg-background
+build/generate-dmg-background
+```

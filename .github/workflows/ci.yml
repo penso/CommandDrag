@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check scripts and metadata
         run: |
-          bash -n build.sh Scripts/release.sh
+          bash -n build.sh Scripts/release.sh Scripts/package-dmg.sh
           plutil -lint Sources/Info.plist
       - name: Static analysis
         run: |
@@ -38,8 +38,17 @@ jobs:
           codesign --verify --strict --verbose=2 build/CommandDrag.app
       - name: Package CI build
         run: ditto -c -k --sequesterRsrc --keepParent build/CommandDrag.app build/CommandDrag-universal.zip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and verify drag-to-install DMG
+        run: |
+          python -m pip install -r Scripts/dmg-requirements.txt
+          DMG_PYTHON=python bash Scripts/package-dmg.sh
       - uses: actions/upload-artifact@v4
         with:
           name: CommandDrag-universal-adhoc
-          path: build/CommandDrag-universal.zip
+          path: |
+            build/CommandDrag-universal.zip
+            build/CommandDrag-universal.dmg
           retention-days: 7

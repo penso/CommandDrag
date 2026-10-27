@@ -45,6 +45,11 @@ jobs:
           sparse-checkout: Scripts/release.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install DMG packaging tools
+        run: python -m pip install -r Scripts/dmg-requirements.txt
       - name: Build, sign, and notarize
         env:
           DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -54,6 +59,7 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
           BUILD_NUMBER: ${{ github.run_number }}
+          DMG_PYTHON: python
         run: SOURCE_DIR="$GITHUB_WORKSPACE" bash .release-tools/Scripts/release.sh
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
@@ -61,6 +67,7 @@ jobs:
           name: CommandDrag-${{ env.RELEASE_TAG }}-universal
           path: |
             build/CommandDrag-*-universal.zip
+            build/CommandDrag-*-universal.dmg
             build/SHA256SUMS
           if-no-files-found: error
       - name: Publish GitHub release
@@ -70,5 +77,6 @@ jobs:
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
           gh release create "$RELEASE_TAG" \
+            "build/CommandDrag-${RELEASE_TAG}-universal.dmg" \
             "build/CommandDrag-${RELEASE_TAG}-universal.zip" build/SHA256SUMS \
             --verify-tag --title "CommandDrag ${RELEASE_TAG}" --generate-notes "${flags[@]}"

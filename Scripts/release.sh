@@ -55,24 +55,36 @@ for arch in arm64 x86_64; do
 done
 codesign --verify --strict --verbose=2 "$APP"
 
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEMP_DIR/notarize.zip"
-SUBMIT_STATUS=0
-xcrun notarytool submit "$TEMP_DIR/notarize.zip" \
-  --key "$TEMP_DIR/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
-  --wait --timeout 20m --output-format json > "$TEMP_DIR/notarization.json" || SUBMIT_STATUS=$?
-if [[ "$SUBMIT_STATUS" != 0 ]] || [[ "$(plutil -extract status raw -o - "$TEMP_DIR/notarization.json")" != "Accepted" ]]; then
-  cat "$TEMP_DIR/notarization.json"
-  SUBMISSION_ID=$(plutil -extract id raw -o - "$TEMP_DIR/notarization.json" 2>/dev/null) || SUBMISSION_ID=""
-  if [[ -n "$SUBMISSION_ID" ]]; then
-    xcrun notarytool log "$SUBMISSION_ID" \
-      --key "$TEMP_DIR/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
+notarize() {
+  local target=$1 status=0 submission_id
+  xcrun notarytool submit "$target" \
+    --key "$TEMP_DIR/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
+    --wait --timeout 20m --output-format json > "$TEMP_DIR/notarization.json" || status=$?
+  if [[ "$status" != 0 ]] || [[ "$(plutil -extract status raw -o - "$TEMP_DIR/notarization.json")" != "Accepted" ]]; then
+    cat "$TEMP_DIR/notarization.json"
+    submission_id=$(plutil -extract id raw -o - "$TEMP_DIR/notarization.json" 2>/dev/null) || submission_id=""
+    if [[ -n "$submission_id" ]]; then
+      xcrun notarytool log "$submission_id" \
+        --key "$TEMP_DIR/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
+    fi
+    exit 1
   fi
-  exit 1
-fi
+}
+
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEMP_DIR/notarize.zip"
+notarize "$TEMP_DIR/notarize.zip"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
 ARCHIVE="CommandDrag-${RELEASE_TAG}-universal.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "build/$ARCHIVE"
-(cd build && shasum -a 256 "$ARCHIVE" > SHA256SUMS)
+DMG="CommandDrag-${RELEASE_TAG}-universal.dmg"
+bash Scripts/package-dmg.sh "$APP" "build/$DMG"
+codesign --force --sign "$SIGN_IDENTITY" --keychain "$KEYCHAIN" --timestamp "build/$DMG"
+codesign --verify --strict --verbose=2 "build/$DMG"
+notarize "build/$DMG"
+xcrun stapler staple "build/$DMG"
+xcrun stapler validate "build/$DMG"
+spctl --assess --type open --context context:primary-signature --verbose=2 "build/$DMG"
+(cd build && shasum -a 256 "$ARCHIVE" "$DMG" > SHA256SUMS)

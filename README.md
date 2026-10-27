@@ -49,7 +49,14 @@ Real TextEdit window captures, arranged side by side with labels. The surroundin
 
 ## Install
 
-Published release archives contain a **universal app for Apple Silicon and Intel**. See [GitHub Releases](https://github.com/penso/CommandDrag/releases) for available versions. Unzip the archive, move `CommandDrag.app` to `/Applications`, and open it. Release builds are Developer ID signed and notarized by Apple.
+Download the **universal DMG for Apple Silicon and Intel** from [GitHub Releases](https://github.com/penso/CommandDrag/releases/latest).
+
+1. Open `CommandDrag-vX.Y.Z-universal.dmg`.
+2. **Drag CommandDrag onto the Applications shortcut** in the installer window.
+3. Eject the disk image, then open **CommandDrag from Applications**.
+4. Grant Accessibility permission as described below.
+
+When updating, quit the running copy before replacing it. The app and DMG are **Developer ID signed and notarized by Apple**. A ZIP download is also available if you prefer to copy the app manually.
 
 ### Build from source
 
@@ -169,7 +176,7 @@ The default build includes **arm64 and x86_64**. For a native-only development b
 
 [CI](https://github.com/penso/CommandDrag/actions/workflows/ci.yml) checks scripts, metadata, and static analysis, then builds and verifies a universal app. Its downloadable artifacts are ad-hoc signed development builds.
 
-Tags such as `v1.0.0` trigger the [release workflow](.github/workflows/release.yml): Developer ID signing, Apple notarization, ticket stapling, and a GitHub Release with a universal ZIP and SHA-256 checksum. See [the release guide](docs/releases.md) for credential setup and publishing instructions.
+Tags such as `v1.0.1` trigger the [release workflow](.github/workflows/release.yml): Developer ID signing, Apple notarization, ticket stapling, and a GitHub Release with a drag-to-install DMG, a universal ZIP, and SHA-256 checksums. See [the release guide](docs/releases.md) for credential setup, local DMG packaging, and publishing instructions.
 
 <details>
 <summary>Manual verification checklist</summary>
