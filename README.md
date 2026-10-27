@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <b>Move and resize windows from anywhere. Keep your mouse where you work.</b>
+  <b>Move, resize, and focus windows with your mouse—without reaching for the title bar.</b>
 </p>
 
 <p align="center">
@@ -23,11 +23,11 @@
   <a href="LICENSE">MIT license</a>
 </p>
 
-A lightweight, native Objective-C menu-bar app for **macOS 13 and later**. Hold Command and drag inside a window to move it or resize the nearest edge—no need to find the title bar or grab a thin border.
+A lightweight, native Objective-C menu-bar app for **macOS 13 and later**. Hold Command and drag inside a window to move it or resize the nearest edge. Enable **focus follows mouse** for Linux-style keyboard focus on hover, without clicking or raising the window.
 
 - **⌘ + left-drag** to move a window, including background windows.
 - **⌘ + right-drag** to resize the nearest border or corner.
-- Optional **focus follows mouse without raising** windows.
+- **Hover to focus, without raising:** rest the pointer over a window to send keyboard input there while keeping overlapping windows in place. Optional; no click or modifier needed.
 - Menu-bar controls for pause/resume, modifier selection, and launch at login.
 - Native Objective-C, no third-party runtime dependencies, and no network access.
 
@@ -76,6 +76,7 @@ The app appears as **↔** in the menu bar, without a Dock icon. Keep it in `/Ap
 1. Grant **CommandDrag** access in **System Settings → Privacy & Security → Accessibility**. The app opens this pane on first launch.
 2. If the menu still reports a permission problem, use **Open Input Monitoring…**, enable CommandDrag there, and quit and reopen it. macOS permission behavior varies by version; an active event tap may work with Accessibility permission alone.
 3. The menu should say **Ready**. Turn on **Launch at Login** if desired; approve it in System Settings if macOS asks.
+4. For keyboard focus on hover, enable **Focus Follows Mouse (Without Raising)** in the **↔** menu. This is off by default.
 
 ## Gestures
 
@@ -83,6 +84,7 @@ The app appears as **↔** in the menu bar, without a Dock icon. Keep it in `/Ap
 | --- | --- |
 | Hold Command, then left-drag a window | Move from anywhere in its accessible content |
 | Hold Command, then right-drag a window | Resize the border or corner nearest the drag's starting point |
+| Hover over a window for 180 ms, with hover focus enabled | Give it keyboard focus without clicking or raising it |
 | Release the mouse button | End the gesture, even if Command was released first |
 
 ### Resize from any side
@@ -106,7 +108,15 @@ Use only the selected modifier; extra Command/Option/Control/Shift keys bypass t
 
 ## Focus follows mouse
 
-Enable **Focus Follows Mouse (Without Raising)** from the menu bar. It is off by default, and the preference persists. Rest the pointer over a window for 180 ms to give it keyboard focus without bringing it in front of overlapping windows. This also works between windows of the same app. Moving the pointer across windows does not immediately change focus.
+**Point at a window, then type—no click required.** Like Linux's focus-follows-mouse mode, keyboard focus follows your pointer while the window stacking order stays in place.
+
+1. Open CommandDrag's **↔** menu.
+2. Enable **Focus Follows Mouse (Without Raising)**.
+3. Rest the pointer over the visible part of a window for **180 ms**, then type into its previously focused control.
+
+For example, hover over the exposed portion of a terminal behind your editor. The terminal receives keyboard input while the editor remains in front of it. Hovering changes which window receives input; it does not click a field or reposition the text cursor.
+
+The setting is **off by default** and persists across launches. It works across apps and between windows of the same app. The short delay avoids switching focus whenever you merely cross another window. Turn it off from the same menu to return to normal click-to-focus behavior.
 
 Hover focus is suspended while paused, holding Command/Option/Control/Shift, or dragging with a mouse button. Desktop, menu, and nonstandard window elements are skipped. It does not click the hovered content.
 
