@@ -71,10 +71,26 @@ notarize() {
   fi
 }
 
+staple() {
+  local target=$1 attempt
+  # Apple's ticket service can briefly drop connections or lag after acceptance.
+  for attempt in 1 2 3 4; do
+    if xcrun stapler staple "$target"; then
+      xcrun stapler validate "$target"
+      return $?
+    fi
+    if [[ "$attempt" -lt 4 ]]; then
+      echo "Ticket stapling failed; retrying in $((attempt * 10)) seconds…" >&2
+      sleep "$((attempt * 10))"
+    fi
+  done
+  echo "Could not staple the notarization ticket: $target" >&2
+  return 1
+}
+
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEMP_DIR/notarize.zip"
 notarize "$TEMP_DIR/notarize.zip"
-xcrun stapler staple "$APP"
-xcrun stapler validate "$APP"
+staple "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
 ARCHIVE="CommandDrag-${RELEASE_TAG}-universal.zip"
@@ -84,7 +100,6 @@ bash Scripts/package-dmg.sh "$APP" "build/$DMG"
 codesign --force --sign "$SIGN_IDENTITY" --keychain "$KEYCHAIN" --timestamp "build/$DMG"
 codesign --verify --strict --verbose=2 "build/$DMG"
 notarize "build/$DMG"
-xcrun stapler staple "build/$DMG"
-xcrun stapler validate "build/$DMG"
+staple "build/$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "build/$DMG"
 (cd build && shasum -a 256 "$ARCHIVE" "$DMG" > SHA256SUMS)
