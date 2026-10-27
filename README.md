@@ -176,7 +176,11 @@ The default build includes **arm64 and x86_64**. For a native-only development b
 
 [CI](https://github.com/penso/CommandDrag/actions/workflows/ci.yml) checks scripts, metadata, and static analysis, then builds and verifies a universal app. Its downloadable artifacts are ad-hoc signed development builds.
 
+Workflow changes are gated by **zizmor**. Packaging dependencies are hash-locked and audited for vulnerabilities, including on a weekly schedule. External GitHub Actions are pinned to full commit SHAs, and release signing requires green CI for the exact source commit.
+
 Tags such as `v1.0.1` trigger the [release workflow](.github/workflows/release.yml): Developer ID signing, Apple notarization, ticket stapling, and a GitHub Release with a drag-to-install DMG, a universal ZIP, and SHA-256 checksums. See [the release guide](docs/releases.md) for credential setup, local DMG packaging, and publishing instructions.
+
+The hardened release pipeline also publishes **Sigstore signatures, GitHub build provenance, a CycloneDX SBOM, and SHA-512 checksums**. See [verifying downloads](docs/verification.md) for verification commands and which releases include them.
 
 <details>
 <summary>Manual verification checklist</summary>

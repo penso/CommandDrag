@@ -6,19 +6,28 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  security:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository] -- Run the reusable checks at this exact caller commit.
   build:
     name: Universal macOS build
+    needs: security
     runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check scripts and metadata
         run: |
           bash -n build.sh Scripts/release.sh Scripts/package-dmg.sh
@@ -29,7 +38,8 @@ jobs:
             -mmacosx-version-min=13.0 -Xanalyzer -analyzer-output=text \
             Sources/main.m Sources/Focus.m
       - name: Build universal app
-        run: bash build.sh
+        # Exercise macOS's shipped Bash 3.2, including the ad-hoc signing path.
+        run: /bin/bash build.sh
       - name: Verify architectures and signature
         run: |
           for arch in arm64 x86_64; do
@@ -38,14 +48,14 @@ jobs:
           codesign --verify --strict --verbose=2 build/CommandDrag.app
       - name: Package CI build
         run: ditto -c -k --sequesterRsrc --keepParent build/CommandDrag.app build/CommandDrag-universal.zip
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
       - name: Build and verify drag-to-install DMG
         run: |
-          python -m pip install -r Scripts/dmg-requirements.txt
+          python -m pip install --require-hashes --only-binary=:all: -r Scripts/dmg-requirements.txt
           DMG_PYTHON=python bash Scripts/package-dmg.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: CommandDrag-universal-adhoc
           path: |

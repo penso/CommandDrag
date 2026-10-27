@@ -32,9 +32,9 @@ cp Sources/CommandDrag.icns "$APP/Contents/Resources/CommandDrag.icns"
 cp THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 # Set SIGN_IDENTITY to a Developer ID identity for a distributable build.
-SIGN_FLAGS=()
+SIGN_FLAGS=(--force --sign "${SIGN_IDENTITY:--}" --options runtime)
 if [[ "${SIGN_IDENTITY:--}" != "-" ]]; then SIGN_FLAGS+=(--timestamp); fi
 if [[ -n "${SIGN_KEYCHAIN:-}" ]]; then SIGN_FLAGS+=(--keychain "$SIGN_KEYCHAIN"); fi
-codesign --force --sign "${SIGN_IDENTITY:--}" --options runtime "${SIGN_FLAGS[@]}" "$APP"
+codesign "${SIGN_FLAGS[@]}" "$APP"
 echo "Built $APP"
 echo "Copy it to /Applications before granting permissions or enabling launch at login."

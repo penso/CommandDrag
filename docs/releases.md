@@ -2,17 +2,27 @@
 
 CI builds a universal **arm64 + x86_64** macOS 13+ app on every push to `main`
 and every pull request. Its downloadable artifact is ad-hoc signed and retained
-for seven days. CI does not need credentials.
+for seven days. CI does not need credentials. Both CI and releases are gated by
+zizmor (pedantic mode), release-contract tests, and a hash-locked packaging
+dependency vulnerability audit. The audits also run weekly.
 
 Release tags (`v1.0.0`, `v1.1.0-rc.1`, etc.) trigger a separate workflow that:
 
-1. Imports a Developer ID certificate into a temporary keychain.
-2. Builds and signs a universal app with the hardened runtime and a secure timestamp.
-3. Submits it to Apple's notarization service and requires an accepted result.
-4. Staples and validates the notarization ticket, then checks Gatekeeper acceptance.
-5. Packages a Finder window with the app, an `/Applications` symlink, and drag-to-install instructions.
-6. Signs, notarizes, and staples the DMG itself, then checks its Gatekeeper acceptance.
-7. Publishes `CommandDrag-vX.Y.Z-universal.dmg`, a ZIP alternative, and `SHA256SUMS` to GitHub Releases.
+1. Requires the owner to run the workflow from the release tag in the canonical repository.
+2. Verifies the tag's commit is on `main` and waits for successful main CI on that exact SHA.
+3. Imports a Developer ID certificate into a temporary keychain and builds/signs the universal app.
+4. Notarizes the app, staples its ticket, and checks Gatekeeper acceptance.
+5. Packages the drag-to-install DMG, then signs, notarizes, staples, and checks it too.
+6. Generates a CycloneDX SBOM, build metadata, and SHA-256/SHA-512 checksums of the final files.
+7. In a separate job, keyless-signs the final artifacts using Sigstore and verifies those signatures.
+8. Generates GitHub build-provenance attestations bound to the same source tag and commit.
+9. In a publish-only job, rechecks the tag, checksums, and provenance before creating the release.
+
+The Apple-signing job has only a read-only GitHub token. The attestation job has
+OIDC/attestation permissions but no Apple secrets or release-write access. Only
+the final publication job can write a GitHub Release. All external actions use
+full commit SHAs and checkouts disable credential persistence. Dependabot tracks
+action and packaging-tool updates with a seven-day cooldown.
 
 Tags with a suffix create GitHub prereleases. The app's short version is the
 numeric `X.Y.Z`; its build number comes from the release workflow run number.
@@ -81,16 +91,27 @@ Once CI is green and the credentials are configured:
 ```sh
 git switch main
 git pull --ff-only
-git tag -a v1.0.0 -m 'CommandDrag 1.0.0'
-git push origin v1.0.0
+git tag -a v1.0.2 -m 'CommandDrag 1.0.2'
+git push origin v1.0.2
 gh run list --workflow release.yml
 ```
 
-The release workflow also supports **Run workflow** with an existing tag. This is
-useful after fixing missing credentials; it always checks out that exact tag for
-the app source. Release tooling comes from the workflow's commit, so a manual run
-from `main` can fix packaging or keychain issues without moving an existing tag.
-It does not overwrite an existing release. Use a new version for changed source.
+For a credential or network failure, rerun the failed run, or dispatch from the
+same tag (select the tag in **Run workflow**, not `main`):
+
+```sh
+gh workflow run release.yml --ref v1.0.2 -f tag=v1.0.2
+```
+
+The tag, checked-out source, workflow, and attested source SHA must agree.
+Tooling changes now require a new tag; the earlier tooling-only retry mechanism
+was removed to avoid attesting a different commit from the one actually built.
+Existing releases and tags are not overwritten. A failed or cancelled CI run
+blocks signing; rerun CI successfully before retrying the release.
+
+See [verifying downloads](verification.md) for the checksum, Sigstore, and
+provenance commands. The original `v1.0.0` and `v1.0.1` releases predate this
+attestation pipeline; their assets are not retroactively replaced.
 
 ## Local builds
 
@@ -115,7 +136,7 @@ without AppleScript permissions or a running Finder session.
 ```sh
 bash build.sh
 python3 -m venv build/dmg-venv
-build/dmg-venv/bin/python -m pip install -r Scripts/dmg-requirements.txt
+build/dmg-venv/bin/python -m pip install --require-hashes --only-binary=:all: -r Scripts/dmg-requirements.txt
 bash Scripts/package-dmg.sh
 ```
 

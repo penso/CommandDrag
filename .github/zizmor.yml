@@ -1,0 +1,2 @@
+# No repository-wide or workflow-wide audit exceptions.
+rules: {}

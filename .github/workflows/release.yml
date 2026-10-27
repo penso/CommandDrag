@@ -6,50 +6,69 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag (vX.Y.Z or vX.Y.Z-rc.N)'
+        description: 'Existing release tag; run this workflow FROM the same tag'
         required: true
         type: string
 
-permissions:
-  contents: read
+permissions: {}
 
+# Serialize publishing across versions and never cancel a signing job.
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Sign, notarize, and publish universal macOS app
+  security:
+    if: >-
+      github.repository == 'penso/CommandDrag' &&
+      github.actor == 'penso' && github.triggering_actor == 'penso' &&
+      startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository] -- Run the reusable checks at this exact release commit.
+
+  validate:
+    name: Validate tag and require green CI
+    needs: security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read # Check the exact source commit's completed main CI run.
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      sha: ${{ steps.validate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 Scripts/validate-release.py
+
+  build:
+    name: Sign and notarize universal macOS app and DMG
+    needs: validate
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
     steps:
-      - name: Validate tag
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]] || {
-            echo "Expected vX.Y.Z or vX.Y.Z-rc.N" >&2
-            exit 1
-          }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
-      - name: Check out release tooling
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .release-tools
-          sparse-checkout: Scripts/release.sh
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
-      - name: Install DMG packaging tools
-        run: python -m pip install -r Scripts/dmg-requirements.txt
+      - name: Install verified DMG packaging tools
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r Scripts/dmg-requirements.txt
       - name: Build, sign, and notarize
         env:
           DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -60,23 +79,114 @@ jobs:
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
           BUILD_NUMBER: ${{ github.run_number }}
           DMG_PYTHON: python
-        run: SOURCE_DIR="$GITHUB_WORKSPACE" bash .release-tools/Scripts/release.sh
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        run: /bin/bash Scripts/release.sh
+      - name: Generate SBOM and build metadata
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: python Scripts/release-metadata.py "$RELEASE_TAG" "$RELEASE_SHA" build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: CommandDrag-${{ env.RELEASE_TAG }}-universal
+          name: signed-release
           path: |
             build/CommandDrag-*-universal.zip
             build/CommandDrag-*-universal.dmg
+            build/CommandDrag-*.cdx.json
+            build/build-info.json
             build/SHA256SUMS
+            build/SHA512SUMS
           if-no-files-found: error
-      - name: Publish GitHub release
+          retention-days: 7
+
+  attest:
+    name: Sign artifacts and attest provenance
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Short-lived Sigstore identity; no long-lived signing key.
+      attestations: write # Publish GitHub build-provenance records.
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-release
+          path: dist
+      - name: Verify transferred artifacts
+        working-directory: dist
+        run: |
+          sha256sum --check --strict SHA256SUMS
+          sha512sum --check --strict SHA512SUMS
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.6.5'
+      - name: Keyless sign and verify final artifacts
+        working-directory: dist
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          identity="https://github.com/penso/CommandDrag/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          for file in "CommandDrag-$RELEASE_TAG-universal.dmg" "CommandDrag-$RELEASE_TAG-universal.zip" \
+            "CommandDrag-$RELEASE_TAG.cdx.json" build-info.json SHA256SUMS SHA512SUMS; do
+            test -f "$file" && test ! -L "$file" && test -s "$file"
+            cosign sign-blob --yes --output-signature "$file.sig" --output-certificate "$file.crt" "$file"
+            cosign verify-blob --signature "$file.sig" --certificate "$file.crt" \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$file"
+          done
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: provenance
+        with:
+          subject-path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.cdx.json
+            dist/build-info.json
+            dist/SHA256SUMS
+            dist/SHA512SUMS
+      - name: Preserve offline provenance bundle
+        env:
+          BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: cp "$BUNDLE" dist/provenance.sigstore.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified release
+    needs: [validate, attest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # Only this final job may create a GitHub Release.
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release
+          path: dist
+      - name: Verify provenance and checksums, then publish
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: penso/CommandDrag
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        working-directory: dist
         run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/commits/refs/tags/$RELEASE_TAG" --jq .sha)" = "$RELEASE_SHA"
+          sha256sum --check --strict SHA256SUMS
+          sha512sum --check --strict SHA512SUMS
+          for file in "CommandDrag-$RELEASE_TAG-universal.dmg" "CommandDrag-$RELEASE_TAG-universal.zip" \
+            "CommandDrag-$RELEASE_TAG.cdx.json" build-info.json SHA256SUMS SHA512SUMS; do
+            gh attestation verify "$file" --repo "$GH_REPO" \
+              --signer-workflow penso/CommandDrag/.github/workflows/release.yml \
+              --source-ref "refs/tags/$RELEASE_TAG" --source-digest "$RELEASE_SHA" \
+              --bundle provenance.sigstore.json --deny-self-hosted-runners
+          done
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" \
-            "build/CommandDrag-${RELEASE_TAG}-universal.dmg" \
-            "build/CommandDrag-${RELEASE_TAG}-universal.zip" build/SHA256SUMS \
-            --verify-tag --title "CommandDrag ${RELEASE_TAG}" --generate-notes "${flags[@]}"
+          gh release create "$RELEASE_TAG" ./* --verify-tag \
+            --title "CommandDrag $RELEASE_TAG" --generate-notes "${flags[@]}"

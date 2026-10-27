@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-cd "${SOURCE_DIR:-$(dirname "$0")/..}"
+cd "$(dirname "$0")/.."
 
 # Secrets are supplied by GitHub Actions, never written into the repository.
 for name in RELEASE_TAG DEVELOPER_ID_CERTIFICATE_BASE64 DEVELOPER_ID_CERTIFICATE_PASSWORD \
