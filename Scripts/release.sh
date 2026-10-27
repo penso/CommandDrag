@@ -75,16 +75,16 @@ staple() {
   local target=$1 attempt
   # Apple's ticket service can briefly drop connections or lag after acceptance.
   for attempt in 1 2 3 4; do
-    if xcrun stapler staple "$target"; then
-      xcrun stapler validate "$target"
-      return $?
+    # Validation also contacts Apple's ticket service and can fail transiently.
+    if xcrun stapler staple "$target" && xcrun stapler validate "$target"; then
+      return 0
     fi
     if [[ "$attempt" -lt 4 ]]; then
-      echo "Ticket stapling failed; retrying in $((attempt * 10)) seconds…" >&2
+      echo "Ticket stapling or validation failed; retrying in $((attempt * 10)) seconds…" >&2
       sleep "$((attempt * 10))"
     fi
   done
-  echo "Could not staple the notarization ticket: $target" >&2
+  echo "Could not staple and validate the notarization ticket: $target" >&2
   return 1
 }
 

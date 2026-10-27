@@ -1,6 +1,8 @@
 import hashlib
 import importlib.util
 from pathlib import Path
+import re
+import subprocess
 import tempfile
 import unittest
 
@@ -82,6 +84,33 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(bom["components"][-1]["scope"], "optional")
         refs = {c["bom-ref"] for c in bom["components"]}
         self.assertEqual(set(bom["dependencies"][0]["dependsOn"]), refs)
+
+
+class StaplingTests(unittest.TestCase):
+    def test_validation_network_errors_retry_but_never_bypass_validation(self):
+        # Execute the real shell helper with an Apple-service stub, without credentials or sleeps.
+        source = (ROOT / "Scripts/release.sh").read_text()
+        helper = re.search(r"(?ms)^staple\(\) \{.*?^\}", source).group()
+        for failures, expected in [(0, "0 1"), (1, "0 2"), (4, "1 4")]:
+            script = f"""
+set -eu
+validations=0
+xcrun() {{
+  if [[ "$2" == validate ]]; then
+    validations=$((validations + 1))
+    [[ "$validations" -gt {failures} ]]
+  else
+    return 0
+  fi
+}}
+sleep() {{ :; }}
+{helper}
+if staple /unused/CommandDrag.app; then result=0; else result=$?; fi
+echo "$result $validations"
+"""
+            with self.subTest(failures=failures):
+                result = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout.strip(), expected)
 
 
 if __name__ == "__main__":
