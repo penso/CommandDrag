@@ -37,6 +37,14 @@ jobs:
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
+      - name: Check out release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: Scripts/release.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Build, sign, and notarize
         env:
           DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -46,7 +54,7 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
           BUILD_NUMBER: ${{ github.run_number }}
-        run: bash Scripts/release.sh
+        run: SOURCE_DIR="$GITHUB_WORKSPACE" bash .release-tools/Scripts/release.sh
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:

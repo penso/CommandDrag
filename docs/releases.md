@@ -85,7 +85,9 @@ gh run list --workflow release.yml
 ```
 
 The release workflow also supports **Run workflow** with an existing tag. This is
-useful after fixing missing credentials; it always checks out that exact tag.
+useful after fixing missing credentials; it always checks out that exact tag for
+the app source. Release tooling comes from the workflow's commit, so a manual run
+from `main` can fix packaging or keychain issues without moving an existing tag.
 It does not overwrite an existing release. Use a new version for changed source.
 
 ## Local builds
