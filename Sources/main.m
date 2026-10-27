@@ -11,6 +11,8 @@
     CGPoint _windowStart;
     CGSize _sizeStart;
     BOOL _resizing;
+    NSInteger _resizeX; // -1: left, 0: unchanged, 1: right
+    NSInteger _resizeY; // -1: top, 0: unchanged, 1: bottom
     BOOL _dragging;
     BOOL _enabled;
     BOOL _trusted;
@@ -177,8 +179,24 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         if (!_window) return NULL;
         CGFloat dx = point.x - _mouseStart.x, dy = point.y - _mouseStart.y;
         if (_resizing) {
-            CGSize size = CGSizeMake(fmax(120, _sizeStart.width + dx), fmax(80, _sizeStart.height + dy));
-            if (!WriteAXValue(_window, kAXSizeAttribute, kAXValueCGSizeType, &size)) [self finishDrag];
+            CGSize size = CGSizeMake(
+                _resizeX ? fmax(120, _sizeStart.width + _resizeX * dx) : _sizeStart.width,
+                _resizeY ? fmax(80, _sizeStart.height + _resizeY * dy) : _sizeStart.height);
+            if (!WriteAXValue(_window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
+                [self finishDrag];
+                return NULL;
+            }
+            if (_resizeX < 0 || _resizeY < 0) {
+                // Read back the app's constrained size before anchoring the opposite edges.
+                if (!ReadAXValue(_window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
+                    [self finishDrag];
+                    return NULL;
+                }
+                CGPoint position = _windowStart;
+                if (_resizeX < 0) position.x += _sizeStart.width - size.width;
+                if (_resizeY < 0) position.y += _sizeStart.height - size.height;
+                if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueCGPointType, &position)) [self finishDrag];
+            }
         } else {
             CGPoint position = CGPointMake(_windowStart.x + dx, _windowStart.y + dy);
             if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueCGPointType, &position)) [self finishDrag];
@@ -204,6 +222,23 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         !ReadAXValue(window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
         CFRelease(window);
         return event;
+    }
+    if (right) {
+        CGFloat x = point.x - position.x, y = point.y - position.y;
+        // Outer thirds select corners/sides. In the center, select the nearest border.
+        _resizeX = x < size.width / 3 ? -1 : (x > size.width * 2 / 3 ? 1 : 0);
+        _resizeY = y < size.height / 3 ? -1 : (y > size.height * 2 / 3 ? 1 : 0);
+        if (!_resizeX && !_resizeY) {
+            if (fmin(x, size.width - x) <= fmin(y, size.height - y))
+                _resizeX = x <= size.width / 2 ? -1 : 1;
+            else
+                _resizeY = y <= size.height / 2 ? -1 : 1;
+        }
+        if (_resizeX < 0 || _resizeY < 0) {
+            Boolean movable = false;
+            AXUIElementIsAttributeSettable(window, kAXPositionAttribute, &movable);
+            if (!movable) { CFRelease(window); return event; }
+        }
     }
     _window = window;
     _windowStart = position;

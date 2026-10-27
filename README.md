@@ -29,10 +29,10 @@ The app appears as **↔** in the menu bar, without a Dock icon. Keep it in `/Ap
 | Gesture | Behavior |
 | --- | --- |
 | Hold Command, then left-drag a window | Move from anywhere in its accessible content |
-| Hold Command, then right-drag a window | Resize by moving its bottom-right corner |
+| Hold Command, then right-drag a window | Resize the border or corner nearest the drag's starting point |
 | Release the mouse button | End the gesture, even if Command was released first |
 
-The top-left corner stays fixed during resize. Drag right/down to grow and left/up to shrink. Standard windows honor their application's size constraints; the app also requests a minimum of 120 × 80 points.
+Resize direction is chosen when the mouse button goes down and stays fixed throughout the gesture. The window is divided into thirds: the four corner regions resize both adjacent borders, and the four side regions resize just that border. Starting in the center region selects the nearest border. The opposite border or corner stays fixed; drag outward to grow and inward to shrink. Standard windows honor their application's size constraints; the app also requests a minimum of 120 × 80 points on the resized axes. Left/top resizing reads back the actual size to keep the opposite edge anchored when the app clamps the requested size.
 
 Use **Modifier** to switch to Option or Control. The preference persists. Press only the selected modifier: additional Command/Option/Control/Shift keys bypass the gesture. Ordinary clicks pass through when the modifier is absent, the app is paused, or the target window does not advertise the required capability. An accepted gesture consumes the click, so it doesn't activate links, select text, or open a context menu. Background windows can be manipulated without activating their app.
 
@@ -62,7 +62,7 @@ codesign --verify --strict --verbose=2 build/CommandDrag.app
 Interactive checks after installing and granting Accessibility permission:
 
 1. Move a Finder and TextEdit window by dragging in their content while holding Command. Verify ordinary clicks and text selection still work without it.
-2. Command-right-drag in the center of each window. Verify the top-left stays fixed, app minimum sizes are respected, and no context menu appears. Right-click without Command should still open the normal menu.
+2. Command-right-drag from each corner and each side region. Verify only the selected borders move, opposite borders stay fixed, app minimum sizes are respected (especially while shrinking from the left/top), and no context menu appears. Try the center region too: it should select the nearest border. Right-click without Command should still open the normal menu.
 3. Release Command before the mouse button during each gesture. Verify dragging ends on mouse-up and subsequent clicks work normally.
 4. Try a background window and a window on another display, including one above or left of the main display.
 5. Verify full-screen windows are ignored. Confirm unsupported resize operations pass through.
