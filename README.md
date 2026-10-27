@@ -1,6 +1,6 @@
 # CommandDrag
 
-A small Objective-C menu bar app for macOS 13 or later. No dependencies beyond Apple's frameworks. It uses public Accessibility and Quartz event-tap APIs; it does not disable SIP or inject code into other apps.
+A small Objective-C menu bar app for macOS 13 or later. No dependencies beyond Apple's frameworks. Moving and resizing use public Accessibility and Quartz event-tap APIs. Optional focus-following uses private macOS APIs to focus without raising windows; it does not require disabling SIP or injecting code into other apps.
 
 ## Build and install
 
@@ -36,9 +36,17 @@ Resize direction is chosen when the mouse button goes down and stays fixed throu
 
 Use **Modifier** to switch to Option or Control. The preference persists. Press only the selected modifier: additional Command/Option/Control/Shift keys bypass the gesture. Ordinary clicks pass through when the modifier is absent, the app is paused, or the target window does not advertise the required capability. An accepted gesture consumes the click, so it doesn't activate links, select text, or open a context menu. Background windows can be manipulated without activating their app.
 
+## Focus follows mouse
+
+Enable **Focus Follows Mouse (Without Raising)** from the menu bar. It is off by default, and the preference persists. Rest the pointer over a window for 180 ms to give it keyboard focus without bringing it in front of overlapping windows. This also works between windows of the same app. Moving the pointer across windows does not immediately change focus.
+
+Hover focus is suspended while paused, holding Command/Option/Control/Shift, or dragging with a mouse button. Desktop, menu, and nonstandard window elements are skipped. It does not click the hovered content.
+
+macOS has no public API for this Linux-style focus behavior. The implementation uses the private SkyLight focus protocol also used by yabai. These APIs are resolved at runtime; if unavailable, the menu says **Hover Focus Unavailable**. There is no raise-based fallback. Compatibility may vary with macOS versions and individual apps; an app may choose to raise its own windows in response to activation.
+
 ## Implementation
 
-A single Objective-C source file handles the menu bar and mouse gestures. The event tap listens only for left/right button presses, drags, and releases; ordinary mouse movement does no work. Window lookup happens once per gesture, and subsequent drag events update that window directly through Accessibility. Accessibility calls use a short timeout, and a failed update cancels window manipulation while still consuming the remainder of the gesture. A low-frequency, coalescible timer checks permissions; the menu is rebuilt only when needed.
+The main Objective-C source file handles the menu bar and mouse gestures; a small separate helper implements no-raise focus. The event tap listens for left/right button presses, drags, releases, and mouse movement. With hover focus disabled, mouse movement passes straight through. With it enabled, movement resets a one-shot hover timer; window lookup and focus happen outside the event-tap callback. There is no continuous hover polling. Moving/resizing looks up the window once per gesture, then updates it directly through Accessibility. Accessibility calls use a short timeout, and a failed update cancels window manipulation while still consuming the remainder of the gesture. A low-frequency, coalescible timer checks permissions; the menu is rebuilt only when needed.
 
 ## Limitations and permissions
 
@@ -69,10 +77,12 @@ Interactive checks after installing and granting Accessibility permission:
 6. Pause/resume; switch modifiers; quit/reopen to check the saved selection.
 7. Enable launch at login, sign out/in, and check the app returns. Disable it and verify the setting clears.
 8. Revoke Accessibility access and verify the permission status updates; restore it and relaunch if needed.
+9. Enable hover focus and arrange overlapping windows from different apps. Hover over the exposed part of the rear window, then type into an already focused text field: keyboard input should switch while the window order remains unchanged. Repeat with two windows of the same app. Check that merely crossing a window, holding a modifier, and dragging do not switch focus. Disable hover focus and verify click-to-focus behavior returns.
 
 ## Files
 
 - `Sources/main.m`: menu, preferences, permissions, login item, hit-testing, and mouse handling.
+- `Sources/Focus.h`, `Sources/Focus.m`: dynamically resolved focus-without-raising support.
 - `Sources/Info.plist`: app bundle metadata.
 - `Sources/CommandDrag.icns`: app icon for Finder and System Settings.
 - `Scripts/generate-icon.m`: native, reproducible icon artwork generator.

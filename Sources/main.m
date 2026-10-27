@@ -2,6 +2,7 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <math.h>
+#import "Focus.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate> {
     CFMachPortRef _tap;
@@ -16,10 +17,13 @@
     BOOL _dragging;
     BOOL _enabled;
     BOOL _trusted;
+    BOOL _focusFollowsMouse;
+    CGPoint _hoverPoint;
     CGEventFlags _modifier;
 }
 @property(nonatomic, strong) NSStatusItem *statusItem;
 @property(nonatomic, strong) NSTimer *permissionTimer;
+@property(nonatomic, strong) NSTimer *hoverTimer;
 - (CGEventRef)handleEvent:(CGEventRef)event type:(CGEventType)type;
 @end
 
@@ -55,6 +59,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     (void)notification;
     _enabled = YES;
     _trusted = AXIsProcessTrusted();
+    _focusFollowsMouse = [[NSUserDefaults standardUserDefaults] boolForKey:@"focusFollowsMouse"];
     NSNumber *saved = [[NSUserDefaults standardUserDefaults] objectForKey:@"modifier"];
     _modifier = saved ? saved.unsignedLongLongValue : kCGEventFlagMaskCommand;
     if (_modifier != kCGEventFlagMaskCommand && _modifier != kCGEventFlagMaskAlternate &&
@@ -85,6 +90,12 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     [menu addItem:status];
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItem:[self item:(_enabled ? @"Pause" : @"Resume") action:@selector(toggleEnabled:)]];
+    BOOL canFocus = FocusWithoutRaiseAvailable();
+    NSMenuItem *hover = [self item:(canFocus ? @"Focus Follows Mouse (Without Raising)" : @"Hover Focus Unavailable")
+        action:(canFocus ? @selector(toggleFocusFollowsMouse:) : NULL)];
+    hover.enabled = canFocus;
+    hover.state = _focusFollowsMouse ? NSControlStateValueOn : NSControlStateValueOff;
+    [menu addItem:hover];
     NSMenuItem *modifierItem = [self item:@"Modifier" action:NULL];
     NSMenu *modifiers = [[NSMenu alloc] init];
     NSArray<NSString *> *names = @[@"Command ⌘", @"Option ⌥", @"Control ⌃"];
@@ -111,7 +122,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     if (_tap || !AXIsProcessTrusted()) return;
     CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventLeftMouseUp) |
         CGEventMaskBit(kCGEventLeftMouseDragged) | CGEventMaskBit(kCGEventRightMouseDown) |
-        CGEventMaskBit(kCGEventRightMouseUp) | CGEventMaskBit(kCGEventRightMouseDragged);
+        CGEventMaskBit(kCGEventRightMouseUp) | CGEventMaskBit(kCGEventRightMouseDragged) |
+        CGEventMaskBit(kCGEventMouseMoved);
     _tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
         kCGEventTapOptionDefault, mask, EventCallback, (__bridge void *)self);
     if (_tap) {
@@ -134,6 +146,50 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 
 - (void)finishDrag {
     if (_window) { CFRelease(_window); _window = NULL; }
+}
+
+- (void)cancelHover {
+    [self.hoverTimer invalidate];
+    self.hoverTimer = nil;
+}
+
+- (void)focusHoveredWindow:(NSTimer *)timer {
+    (void)timer;
+    self.hoverTimer = nil;
+    if (!_enabled || !_focusFollowsMouse || _dragging || !FocusWithoutRaiseAvailable() || !AXIsProcessTrusted()) return;
+    CGEventFlags modifiers = kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate |
+        kCGEventFlagMaskControl | kCGEventFlagMaskShift;
+    if (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & modifiers) return;
+    // Never switch focus during another app's selection, resize, or drag-and-drop.
+    for (CGMouseButton button = 0; button < 32; button++) {
+        if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, button)) return;
+    }
+    AXUIElementRef window = [self copyWindowAtPoint:_hoverPoint];
+    if (!window) return;
+    AXUIElementSetMessagingTimeout(window, 0.05f);
+    CFTypeRef subrole = NULL;
+    AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, &subrole);
+    BOOL supported = subrole && (CFEqual(subrole, kAXStandardWindowSubrole) || CFEqual(subrole, kAXDialogSubrole));
+    if (subrole) CFRelease(subrole);
+    pid_t pid = 0;
+    AXUIElementGetPid(window, &pid);
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (supported && app && app.processIdentifier != NSProcessInfo.processInfo.processIdentifier &&
+        app.activationPolicy == NSApplicationActivationPolicyRegular) {
+        AXUIElementRef application = AXUIElementCreateApplication(pid);
+        AXUIElementSetMessagingTimeout(application, 0.05f);
+        CFTypeRef focused = NULL;
+        AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute, &focused);
+        BOOL alreadyFocused = app.active && focused && CFEqual(focused, window);
+        if (!alreadyFocused) {
+            AXUIElementRef previous = app.active && focused && CFGetTypeID(focused) == AXUIElementGetTypeID()
+                ? (AXUIElementRef)focused : NULL;
+            FocusWindowWithoutRaise(window, previous, pid);
+        }
+        if (focused) CFRelease(focused);
+        CFRelease(application);
+    }
+    CFRelease(window);
 }
 
 - (AXUIElementRef)copyWindowAtPoint:(CGPoint)point {
@@ -161,10 +217,24 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 
 - (CGEventRef)handleEvent:(CGEventRef)event type:(CGEventType)type {
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        [self cancelHover];
         [self finishDrag];
         if (_tap) CGEventTapEnable(_tap, true);
         return event;
     }
+    if (type == kCGEventMouseMoved) {
+        CGEventFlags modifiers = kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate |
+            kCGEventFlagMaskControl | kCGEventFlagMaskShift;
+        if (_enabled && _focusFollowsMouse && FocusWithoutRaiseAvailable() && !_dragging && !(CGEventGetFlags(event) & modifiers)) {
+            _hoverPoint = CGEventGetLocation(event);
+            // Debounce movement without doing Accessibility work inside the event tap.
+            if (self.hoverTimer) self.hoverTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:0.18];
+            else self.hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.18 target:self
+                selector:@selector(focusHoveredWindow:) userInfo:nil repeats:NO];
+        } else [self cancelHover];
+        return event;
+    }
+    [self cancelHover];
     BOOL down = type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown;
     BOOL up = type == kCGEventLeftMouseUp || type == kCGEventRightMouseUp;
     BOOL right = type == kCGEventRightMouseDown || type == kCGEventRightMouseDragged || type == kCGEventRightMouseUp;
@@ -253,7 +323,15 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 - (void)toggleEnabled:(id)sender {
     (void)sender;
     _enabled = !_enabled;
+    [self cancelHover];
     // Keep an active gesture until mouse-up so its swallowed down has a swallowed up.
+    [self rebuildMenu];
+}
+- (void)toggleFocusFollowsMouse:(id)sender {
+    (void)sender;
+    _focusFollowsMouse = !_focusFollowsMouse;
+    [[NSUserDefaults standardUserDefaults] setBool:_focusFollowsMouse forKey:@"focusFollowsMouse"];
+    [self cancelHover];
     [self rebuildMenu];
 }
 - (void)changeModifier:(NSMenuItem *)sender {
@@ -292,6 +370,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 - (void)applicationWillTerminate:(NSNotification *)notification {
     (void)notification;
     [self.permissionTimer invalidate];
+    [self cancelHover];
     [self finishDrag];
     if (_tap) CGEventTapEnable(_tap, false);
     if (_tapSource) {
