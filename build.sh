@@ -14,6 +14,7 @@ xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 \
 cp Sources/Info.plist "$APP/Contents/Info.plist"
 cp Sources/CommandDrag.icns "$APP/Contents/Resources/CommandDrag.icns"
 cp THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
+cp LICENSE "$APP/Contents/Resources/LICENSE"
 # Set SIGN_IDENTITY to a Developer ID identity for a distributable build.
 codesign --force --sign "${SIGN_IDENTITY:--}" --options runtime "$APP"
 echo "Built $APP"

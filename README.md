@@ -1,6 +1,14 @@
 # CommandDrag
 
+**Move and resize macOS windows from anywhere with Command + drag.**
+
 A small Objective-C menu bar app for macOS 13 or later. No dependencies beyond Apple's frameworks. Moving and resizing use public Accessibility and Quartz event-tap APIs. Optional focus-following uses private macOS APIs to focus without raising windows; it does not require disabling SIP or injecting code into other apps.
+
+- **⌘ + left-drag** to move a window, including background windows.
+- **⌘ + right-drag** to resize the nearest border or corner.
+- Optional **focus follows mouse without raising** windows.
+- Menu-bar controls for pause/resume, modifier selection, and launch at login.
+- Native Objective-C, no third-party runtime dependencies, and no network access.
 
 ## Build and install
 
@@ -10,9 +18,11 @@ On your Mac, install Apple's command line tools if needed:
 xcode-select --install
 ```
 
-From this directory:
+Clone and build:
 
 ```sh
+git clone https://github.com/penso/CommandDrag.git
+cd CommandDrag
 bash build.sh
 ditto build/CommandDrag.app /Applications/CommandDrag.app
 open /Applications/CommandDrag.app
@@ -99,3 +109,9 @@ bash build.sh
 ```
 
 To remove: disable Launch at Login, quit CommandDrag, delete `/Applications/CommandDrag.app`, and remove its Privacy & Security entries.
+
+## License
+
+[MIT](LICENSE) © 2026 Fabien Penso.
+
+The focus-without-raising protocol is adapted from [yabai](https://github.com/koekeishiya/yabai), also MIT-licensed. See [third-party notices](THIRD_PARTY_NOTICES.md) for attribution and license terms.
