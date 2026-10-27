@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Universal macOS build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scripts and metadata
+        run: |
+          bash -n build.sh Scripts/release.sh
+          plutil -lint Sources/Info.plist
+      - name: Static analysis
+        run: |
+          xcrun clang --analyze -fobjc-arc -Wall -Wextra -Werror \
+            -mmacosx-version-min=13.0 -Xanalyzer -analyzer-output=text \
+            Sources/main.m Sources/Focus.m
+      - name: Build universal app
+        run: bash build.sh
+      - name: Verify architectures and signature
+        run: |
+          for arch in arm64 x86_64; do
+            lipo build/CommandDrag.app/Contents/MacOS/CommandDrag -verify_arch "$arch"
+          done
+          codesign --verify --strict --verbose=2 build/CommandDrag.app
+      - name: Package CI build
+        run: ditto -c -k --sequesterRsrc --keepParent build/CommandDrag.app build/CommandDrag-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CommandDrag-universal-adhoc
+          path: build/CommandDrag-universal.zip
+          retention-days: 7
