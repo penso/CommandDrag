@@ -208,12 +208,23 @@ After installing and granting Accessibility permission:
 - `Scripts/generate-icon.m`: native, reproducible icon artwork generator.
 - `assets/commanddrag.png`: PNG version of the app icon for this README.
 - `build.sh`: compile and sign a local app bundle.
+- `compile_flags.txt`: shared compiler warning set, also read by clang-tidy and clangd.
+- `Scripts/lint.sh`: clang-format, clang-tidy (`.clang-tidy`), per-architecture warnings, and the Clang static analyzer.
+
+To lint with the same pinned tools as CI:
+
+```sh
+python3 -m venv build/lint-venv
+build/lint-venv/bin/pip install --require-hashes --only-binary=:all: -r Scripts/lint-requirements.txt
+PATH="$PWD/build/lint-venv/bin:$PATH" bash Scripts/lint.sh        # check
+PATH="$PWD/build/lint-venv/bin:$PATH" bash Scripts/lint.sh --fix  # apply clang-format
+```
 
 To regenerate the icon (the normal build uses the checked-in icon):
 
 ```sh
 mkdir -p build
-xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Cocoa Scripts/generate-icon.m -o build/generate-icon
+xcrun clang @compile_flags.txt -Werror -O2 -framework Cocoa Scripts/generate-icon.m -o build/generate-icon
 build/generate-icon
 iconutil -c icns build/CommandDrag.iconset -o Sources/CommandDrag.icns
 cp build/CommandDrag.iconset/icon_256x256@2x.png assets/commanddrag.png

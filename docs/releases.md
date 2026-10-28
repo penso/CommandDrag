@@ -149,7 +149,7 @@ The layout lives in `Scripts/dmg-settings.py`. To regenerate its standard and
 Retina instruction backgrounds:
 
 ```sh
-xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Cocoa \
+xcrun clang @compile_flags.txt -Werror -O2 -framework Cocoa \
   Scripts/generate-dmg-background.m -o build/generate-dmg-background
 build/generate-dmg-background
 ```

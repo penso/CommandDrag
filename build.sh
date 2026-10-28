@@ -14,9 +14,9 @@ for arch in ${ARCHS:-arm64 x86_64}; do
   esac
 done
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 \
+# compile_flags.txt holds the shared warning set; clang-tidy and clangd read it too.
+xcrun clang @compile_flags.txt -Werror -O2 \
   "${ARCH_FLAGS[@]}" \
-  -mmacosx-version-min=13.0 \
   -framework Cocoa -framework ApplicationServices -framework ServiceManagement \
   Sources/main.m Sources/Focus.m -o "$APP/Contents/MacOS/CommandDrag"
 cp Sources/Info.plist "$APP/Contents/Info.plist"
