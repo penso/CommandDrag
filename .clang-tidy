@@ -1,0 +1,29 @@
+# Objective-C lint profile. Disabled checks conflict with Apple Cocoa idioms or
+# with Focus.m's byte-level event records; everything else is an error.
+# readability-redundant-parentheses misreads boxed expressions such as @(kFlag).
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  misc-*,
+  objc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  google-objc-avoid-nsobject-new,
+  google-objc-avoid-throwing-exception,
+  -bugprone-easily-swappable-parameters,
+  -clang-analyzer-optin.osx.cocoa.localizability.*,
+  -readability-avoid-nested-conditional-operator,
+  -readability-braces-around-statements,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-isolate-declaration,
+  -readability-magic-numbers,
+  -readability-math-missing-parentheses,
+  -readability-redundant-parentheses,
+  -readability-uppercase-literal-suffix
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(Sources|Scripts)/'

@@ -27,26 +27,32 @@
 - (CGEventRef)handleEvent:(CGEventRef)event type:(CGEventType)type;
 @end
 
-static CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type,
-                                CGEventRef event, void *context) {
+// Keep Accessibility calls short: they can run while the event tap is waiting.
+static const float AXTimeout = 0.05f;
+static const CGEventFlags ModifierMask =
+    kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate | kCGEventFlagMaskControl | kCGEventFlagMaskShift;
+
+static CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
     (void)proxy;
     return [(__bridge AppDelegate *)context handleEvent:event type:type];
 }
 
-static BOOL ReadAXValue(AXUIElementRef element, CFStringRef attribute,
-                        AXValueType type, void *result) {
+static BOOL ReadAXValue(AXUIElementRef element, CFStringRef attribute, AXValueType type, void *result) {
     CFTypeRef value = NULL;
-    if (AXUIElementCopyAttributeValue(element, attribute, &value) != kAXErrorSuccess || !value)
-        return NO;
-    BOOL valid = CFGetTypeID(value) == AXValueGetTypeID() &&
-        AXValueGetType((AXValueRef)value) == type &&
+    if (AXUIElementCopyAttributeValue(element, attribute, &value) != kAXErrorSuccess || !value) return NO;
+    BOOL valid = CFGetTypeID(value) == AXValueGetTypeID() && AXValueGetType((AXValueRef)value) == type &&
         AXValueGetValue((AXValueRef)value, type, result);
     CFRelease(value);
     return valid;
 }
 
-static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
-                         AXValueType type, const void *value) {
+static void OpenPrivacySettings(NSString *pane) {
+    NSString *string = [@"x-apple.systempreferences:com.apple.preference.security?" stringByAppendingString:pane];
+    NSURL *url = [NSURL URLWithString:string];
+    if (url) [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
+static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueType type, const void *value) {
     AXValueRef wrapped = AXValueCreate(type, value);
     if (!wrapped) return NO;
     AXError error = AXUIElementSetAttributeValue(element, attribute, wrapped);
@@ -58,19 +64,24 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
     _enabled = YES;
-    _trusted = AXIsProcessTrusted();
+    _trusted = AXIsProcessTrusted() ? YES : NO;
     _focusFollowsMouse = [[NSUserDefaults standardUserDefaults] boolForKey:@"focusFollowsMouse"];
     NSNumber *saved = [[NSUserDefaults standardUserDefaults] objectForKey:@"modifier"];
-    _modifier = saved ? saved.unsignedLongLongValue : kCGEventFlagMaskCommand;
+    _modifier = saved ? (CGEventFlags)saved.unsignedLongLongValue : kCGEventFlagMaskCommand;
     if (_modifier != kCGEventFlagMaskCommand && _modifier != kCGEventFlagMaskAlternate &&
-        _modifier != kCGEventFlagMaskControl) _modifier = kCGEventFlagMaskCommand;
+        _modifier != kCGEventFlagMaskControl) {
+        _modifier = kCGEventFlagMaskCommand;
+    }
     self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     self.statusItem.button.title = @"↔";
     self.statusItem.button.toolTip = @"CommandDrag — modifier + left drag to move, right drag to resize";
     [self rebuildMenu];
     [self startTap];
-    self.permissionTimer = [NSTimer scheduledTimerWithTimeInterval:2 target:self
-        selector:@selector(checkPermissions:) userInfo:nil repeats:YES];
+    self.permissionTimer = [NSTimer scheduledTimerWithTimeInterval:2
+                                                            target:self
+                                                          selector:@selector(checkPermissions:)
+                                                          userInfo:nil
+                                                           repeats:YES];
     self.permissionTimer.tolerance = 1;
     if (!AXIsProcessTrusted()) [self requestAccessibility:nil];
 }
@@ -83,8 +94,9 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 
 - (void)rebuildMenu {
     NSMenu *menu = [[NSMenu alloc] init];
-    NSString *state = !AXIsProcessTrusted() ? @"Needs Accessibility permission" :
-        (!_tap ? @"Needs Input Monitoring permission" : (_enabled ? @"Ready" : @"Paused"));
+    NSString *state = !AXIsProcessTrusted()
+        ? @"Needs Accessibility permission"
+        : (!_tap ? @"Needs Input Monitoring permission" : (_enabled ? @"Ready" : @"Paused"));
     NSMenuItem *status = [self item:state action:NULL];
     status.enabled = NO;
     [menu addItem:status];
@@ -92,24 +104,26 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     [menu addItem:[self item:(_enabled ? @"Pause" : @"Resume") action:@selector(toggleEnabled:)]];
     BOOL canFocus = FocusWithoutRaiseAvailable();
     NSMenuItem *hover = [self item:(canFocus ? @"Focus Follows Mouse (Without Raising)" : @"Hover Focus Unavailable")
-        action:(canFocus ? @selector(toggleFocusFollowsMouse:) : NULL)];
+                            action:(canFocus ? @selector(toggleFocusFollowsMouse:) : NULL)];
     hover.enabled = canFocus;
     hover.state = _focusFollowsMouse ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:hover];
     NSMenuItem *modifierItem = [self item:@"Modifier" action:NULL];
     NSMenu *modifiers = [[NSMenu alloc] init];
     NSArray<NSString *> *names = @[@"Command ⌘", @"Option ⌥", @"Control ⌃"];
-    NSArray<NSNumber *> *values = @[@(kCGEventFlagMaskCommand), @(kCGEventFlagMaskAlternate), @(kCGEventFlagMaskControl)];
+    NSArray<NSNumber *> *values =
+        @[@(kCGEventFlagMaskCommand), @(kCGEventFlagMaskAlternate), @(kCGEventFlagMaskControl)];
     for (NSUInteger i = 0; i < names.count; i++) {
         NSMenuItem *item = [self item:names[i] action:@selector(changeModifier:)];
         item.representedObject = values[i];
-        item.state = (_modifier == values[i].unsignedLongLongValue) ? NSControlStateValueOn : NSControlStateValueOff;
+        item.state = _modifier == values[i].unsignedLongLongValue ? NSControlStateValueOn : NSControlStateValueOff;
         [modifiers addItem:item];
     }
     modifierItem.submenu = modifiers;
     [menu addItem:modifierItem];
     NSMenuItem *login = [self item:@"Launch at Login" action:@selector(toggleLogin:)];
-    login.state = SMAppService.mainAppService.status == SMAppServiceStatusEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    login.state = SMAppService.mainAppService.status == SMAppServiceStatusEnabled ? NSControlStateValueOn
+                                                                                  : NSControlStateValueOff;
     [menu addItem:login];
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItem:[self item:@"Grant Accessibility…" action:@selector(requestAccessibility:)]];
@@ -124,8 +138,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         CGEventMaskBit(kCGEventLeftMouseDragged) | CGEventMaskBit(kCGEventRightMouseDown) |
         CGEventMaskBit(kCGEventRightMouseUp) | CGEventMaskBit(kCGEventRightMouseDragged) |
         CGEventMaskBit(kCGEventMouseMoved);
-    _tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-        kCGEventTapOptionDefault, mask, EventCallback, (__bridge void *)self);
+    _tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, mask, EventCallback,
+        (__bridge void *)self);
     if (_tap) {
         _tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _tap, 0);
         CFRunLoopAddSource(CFRunLoopGetMain(), _tapSource, kCFRunLoopCommonModes);
@@ -136,7 +150,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 
 - (void)checkPermissions:(NSTimer *)timer {
     (void)timer;
-    BOOL trusted = AXIsProcessTrusted();
+    BOOL trusted = AXIsProcessTrusted() ? YES : NO;
     BOOL changed = trusted != _trusted;
     _trusted = trusted;
     if (!_tap) [self startTap];
@@ -145,7 +159,10 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 }
 
 - (void)finishDrag {
-    if (_window) { CFRelease(_window); _window = NULL; }
+    if (_window) {
+        CFRelease(_window);
+        _window = NULL;
+    }
 }
 
 - (void)cancelHover {
@@ -157,16 +174,16 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     (void)timer;
     self.hoverTimer = nil;
     if (!_enabled || !_focusFollowsMouse || _dragging || !FocusWithoutRaiseAvailable() || !AXIsProcessTrusted()) return;
-    CGEventFlags modifiers = kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate |
-        kCGEventFlagMaskControl | kCGEventFlagMaskShift;
-    if (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & modifiers) return;
+    if (CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState) & ModifierMask) return;
     // Never switch focus during another app's selection, resize, or drag-and-drop.
-    for (CGMouseButton button = 0; button < 32; button++) {
-        if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, button)) return;
+    // CGMouseButton only names buttons 0-2, but Quartz tracks all 32.
+    for (uint32_t button = 0; button < 32; button++) {
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        if (CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState, (CGMouseButton)button)) return;
     }
     AXUIElementRef window = [self copyWindowAtPoint:_hoverPoint];
     if (!window) return;
-    AXUIElementSetMessagingTimeout(window, 0.05f);
+    AXUIElementSetMessagingTimeout(window, AXTimeout);
     CFTypeRef subrole = NULL;
     AXUIElementCopyAttributeValue(window, kAXSubroleAttribute, &subrole);
     BOOL supported = subrole && (CFEqual(subrole, kAXStandardWindowSubrole) || CFEqual(subrole, kAXDialogSubrole));
@@ -177,13 +194,14 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     if (supported && app && app.processIdentifier != NSProcessInfo.processInfo.processIdentifier &&
         app.activationPolicy == NSApplicationActivationPolicyRegular) {
         AXUIElementRef application = AXUIElementCreateApplication(pid);
-        AXUIElementSetMessagingTimeout(application, 0.05f);
+        AXUIElementSetMessagingTimeout(application, AXTimeout);
         CFTypeRef focused = NULL;
         AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute, &focused);
         BOOL alreadyFocused = app.active && focused && CFEqual(focused, window);
         if (!alreadyFocused) {
             AXUIElementRef previous = app.active && focused && CFGetTypeID(focused) == AXUIElementGetTypeID()
-                ? (AXUIElementRef)focused : NULL;
+                ? (AXUIElementRef)focused
+                : NULL;
             FocusWindowWithoutRaise(window, previous, pid);
         }
         if (focused) CFRelease(focused);
@@ -194,12 +212,12 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
 
 - (AXUIElementRef)copyWindowAtPoint:(CGPoint)point {
     AXUIElementRef system = AXUIElementCreateSystemWide();
-    AXUIElementSetMessagingTimeout(system, 0.05f);
+    AXUIElementSetMessagingTimeout(system, AXTimeout);
     AXUIElementRef hit = NULL;
-    AXError error = AXUIElementCopyElementAtPosition(system, point.x, point.y, &hit);
+    AXError error = AXUIElementCopyElementAtPosition(system, (float)point.x, (float)point.y, &hit);
     CFRelease(system);
     if (error != kAXErrorSuccess || !hit) return NULL;
-    AXUIElementSetMessagingTimeout(hit, 0.05f);
+    AXUIElementSetMessagingTimeout(hit, AXTimeout);
     CFTypeRef role = NULL;
     AXUIElementCopyAttributeValue(hit, kAXRoleAttribute, &role);
     BOOL isWindow = role && CFEqual(role, kAXWindowRole);
@@ -223,15 +241,22 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         return event;
     }
     if (type == kCGEventMouseMoved) {
-        CGEventFlags modifiers = kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate |
-            kCGEventFlagMaskControl | kCGEventFlagMaskShift;
-        if (_enabled && _focusFollowsMouse && FocusWithoutRaiseAvailable() && !_dragging && !(CGEventGetFlags(event) & modifiers)) {
+        if (_enabled && _focusFollowsMouse && FocusWithoutRaiseAvailable() && !_dragging &&
+            !(CGEventGetFlags(event) & ModifierMask)) {
             _hoverPoint = CGEventGetLocation(event);
             // Debounce movement without doing Accessibility work inside the event tap.
-            if (self.hoverTimer) self.hoverTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:0.18];
-            else self.hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.18 target:self
-                selector:@selector(focusHoveredWindow:) userInfo:nil repeats:NO];
-        } else [self cancelHover];
+            if (self.hoverTimer) {
+                self.hoverTimer.fireDate = [NSDate dateWithTimeIntervalSinceNow:0.18];
+            } else {
+                self.hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.18
+                                                                   target:self
+                                                                 selector:@selector(focusHoveredWindow:)
+                                                                 userInfo:nil
+                                                                  repeats:NO];
+            }
+        } else {
+            [self cancelHover];
+        }
         return event;
     }
     [self cancelHover];
@@ -243,42 +268,43 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     if (_dragging && right == _resizing && down && !_window) _dragging = NO;
     if (_dragging) {
         if (right != _resizing) return event;
-        if (up) { [self finishDrag]; _dragging = NO; return NULL; }
+        if (up) {
+            [self finishDrag];
+            _dragging = NO;
+            return NULL;
+        }
         if (down) return NULL;
         // Continue swallowing a canceled gesture until its matching mouse-up.
         if (!_window) return NULL;
         CGFloat dx = point.x - _mouseStart.x, dy = point.y - _mouseStart.y;
         if (_resizing) {
-            CGSize size = CGSizeMake(
-                _resizeX ? fmax(120, _sizeStart.width + _resizeX * dx) : _sizeStart.width,
-                _resizeY ? fmax(80, _sizeStart.height + _resizeY * dy) : _sizeStart.height);
-            if (!WriteAXValue(_window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
+            CGSize size = CGSizeMake(_resizeX ? fmax(120, _sizeStart.width + (CGFloat)_resizeX * dx) : _sizeStart.width,
+                _resizeY ? fmax(80, _sizeStart.height + (CGFloat)_resizeY * dy) : _sizeStart.height);
+            if (!WriteAXValue(_window, kAXSizeAttribute, kAXValueTypeCGSize, &size)) {
                 [self finishDrag];
                 return NULL;
             }
             if (_resizeX < 0 || _resizeY < 0) {
                 // Read back the app's constrained size before anchoring the opposite edges.
-                if (!ReadAXValue(_window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
+                if (!ReadAXValue(_window, kAXSizeAttribute, kAXValueTypeCGSize, &size)) {
                     [self finishDrag];
                     return NULL;
                 }
                 CGPoint position = _windowStart;
                 if (_resizeX < 0) position.x += _sizeStart.width - size.width;
                 if (_resizeY < 0) position.y += _sizeStart.height - size.height;
-                if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueCGPointType, &position)) [self finishDrag];
+                if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueTypeCGPoint, &position)) [self finishDrag];
             }
         } else {
             CGPoint position = CGPointMake(_windowStart.x + dx, _windowStart.y + dy);
-            if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueCGPointType, &position)) [self finishDrag];
+            if (!WriteAXValue(_window, kAXPositionAttribute, kAXValueTypeCGPoint, &position)) [self finishDrag];
         }
         return NULL;
     }
-    CGEventFlags relevant = kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate |
-        kCGEventFlagMaskControl | kCGEventFlagMaskShift;
-    if (!_enabled || !down || (CGEventGetFlags(event) & relevant) != _modifier) return event;
+    if (!_enabled || !down || (CGEventGetFlags(event) & ModifierMask) != _modifier) return event;
     AXUIElementRef window = [self copyWindowAtPoint:point];
     if (!window) return event;
-    AXUIElementSetMessagingTimeout(window, 0.05f);
+    AXUIElementSetMessagingTimeout(window, AXTimeout);
     CFTypeRef fullscreen = NULL;
     AXUIElementCopyAttributeValue(window, CFSTR("AXFullScreen"), &fullscreen);
     BOOL isFullscreen = fullscreen && CFEqual(fullscreen, kCFBooleanTrue);
@@ -287,9 +313,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     AXUIElementIsAttributeSettable(window, right ? kAXSizeAttribute : kAXPositionAttribute, &settable);
     CGPoint position;
     CGSize size;
-    if (isFullscreen || !settable ||
-        !ReadAXValue(window, kAXPositionAttribute, kAXValueCGPointType, &position) ||
-        !ReadAXValue(window, kAXSizeAttribute, kAXValueCGSizeType, &size)) {
+    if (isFullscreen || !settable || !ReadAXValue(window, kAXPositionAttribute, kAXValueTypeCGPoint, &position) ||
+        !ReadAXValue(window, kAXSizeAttribute, kAXValueTypeCGSize, &size)) {
         CFRelease(window);
         return event;
     }
@@ -299,15 +324,16 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         _resizeX = x < size.width / 3 ? -1 : (x > size.width * 2 / 3 ? 1 : 0);
         _resizeY = y < size.height / 3 ? -1 : (y > size.height * 2 / 3 ? 1 : 0);
         if (!_resizeX && !_resizeY) {
-            if (fmin(x, size.width - x) <= fmin(y, size.height - y))
-                _resizeX = x <= size.width / 2 ? -1 : 1;
-            else
-                _resizeY = y <= size.height / 2 ? -1 : 1;
+            if (fmin(x, size.width - x) <= fmin(y, size.height - y)) _resizeX = x <= size.width / 2 ? -1 : 1;
+            else _resizeY = y <= size.height / 2 ? -1 : 1;
         }
         if (_resizeX < 0 || _resizeY < 0) {
             Boolean movable = false;
             AXUIElementIsAttributeSettable(window, kAXPositionAttribute, &movable);
-            if (!movable) { CFRelease(window); return event; }
+            if (!movable) {
+                CFRelease(window);
+                return event;
+            }
         }
     }
     _window = window;
@@ -335,7 +361,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     [self rebuildMenu];
 }
 - (void)changeModifier:(NSMenuItem *)sender {
-    _modifier = [sender.representedObject unsignedLongLongValue];
+    NSNumber *modifier = sender.representedObject;
+    _modifier = (CGEventFlags)modifier.unsignedLongLongValue;
     [[NSUserDefaults standardUserDefaults] setObject:@(_modifier) forKey:@"modifier"];
     [self rebuildMenu];
 }
@@ -343,11 +370,11 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     (void)sender;
     NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
     AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+    OpenPrivacySettings(@"Privacy_Accessibility");
 }
 - (void)openInputMonitoring:(id)sender {
     (void)sender;
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
+    OpenPrivacySettings(@"Privacy_ListenEvent");
 }
 - (void)toggleLogin:(id)sender {
     (void)sender;
@@ -366,7 +393,10 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
     }
     [self rebuildMenu];
 }
-- (void)quit:(id)sender { (void)sender; [NSApp terminate:nil]; }
+- (void)quit:(id)sender {
+    (void)sender;
+    [NSApp terminate:nil];
+}
 - (void)applicationWillTerminate:(NSNotification *)notification {
     (void)notification;
     [self.permissionTimer invalidate];
@@ -377,7 +407,10 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute,
         CFRunLoopRemoveSource(CFRunLoopGetMain(), _tapSource, kCFRunLoopCommonModes);
         CFRelease(_tapSource);
     }
-    if (_tap) { CFMachPortInvalidate(_tap); CFRelease(_tap); }
+    if (_tap) {
+        CFMachPortInvalidate(_tap);
+        CFRelease(_tap);
+    }
 }
 @end
 

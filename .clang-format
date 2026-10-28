@@ -1,0 +1,18 @@
+# Compact Objective-C style used across Sources/ and Scripts/.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ObjCBlockIndentWidth: 4
+ColumnLimit: 120
+AllowShortBlocksOnASingleLine: Always
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AlignOperands: DontAlign
+AlignAfterOpenBracket: DontAlign
+BreakBeforeBinaryOperators: None
+ObjCSpaceAfterProperty: false
+ObjCSpaceBeforeProtocolList: true
+PointerAlignment: Right
+SortIncludes: Never
+SpacesInContainerLiterals: false

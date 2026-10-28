@@ -13,7 +13,8 @@ static CGError (*PostEvent)(ProcessSerialNumber *, uint8_t *);
 BOOL FocusWithoutRaiseAvailable(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        void *skyLight = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL);
+        void *skyLight =
+            dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL);
         GetWindowID = dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
         GetPSN = dlsym(RTLD_DEFAULT, "GetProcessForPID");
         if (skyLight) {

@@ -17,6 +17,25 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository] -- Run the reusable checks at this exact caller commit.
+  lint:
+    name: Objective-C lint
+    needs: security
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned clang-format and clang-tidy
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r Scripts/lint-requirements.txt
+      - name: Format, clang-tidy, warnings, and static analysis
+        run: bash Scripts/lint.sh
   build:
     name: Universal macOS build
     needs: security
@@ -30,13 +49,8 @@ jobs:
           persist-credentials: false
       - name: Check scripts and metadata
         run: |
-          bash -n build.sh Scripts/release.sh Scripts/package-dmg.sh
+          bash -n build.sh Scripts/release.sh Scripts/package-dmg.sh Scripts/lint.sh
           plutil -lint Sources/Info.plist
-      - name: Static analysis
-        run: |
-          xcrun clang --analyze -fobjc-arc -Wall -Wextra -Werror \
-            -mmacosx-version-min=13.0 -Xanalyzer -analyzer-output=text \
-            Sources/main.m Sources/Focus.m
       - name: Build universal app
         # Exercise macOS's shipped Bash 3.2, including the ad-hoc signing path.
         run: /bin/bash build.sh
