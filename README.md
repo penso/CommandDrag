@@ -135,6 +135,7 @@ macOS has no public API for this Linux-style focus behavior. The implementation 
 | --- | --- |
 | Drags do nothing | Check **Accessibility** permission for the installed app and look for **Ready** in its menu. |
 | The menu reports an Input Monitoring problem | Use **Open Input Monitoring…**, enable CommandDrag, then quit and reopen it. |
+| Menu says **Needs Accessibility permission**, but CommandDrag is already enabled in System Settings | The entry belongs to an older copy or signature, so macOS ignores it. Quit CommandDrag, run `tccutil reset Accessibility local.commanddrag.app`, reopen it, and grant access again. The menu switches to **Ready** within a few seconds. |
 | It stopped working after rebuilding | Quit, remove the old Accessibility entry, add `/Applications/CommandDrag.app` again, and reopen. Ad-hoc signatures can invalidate approval after an update. |
 | A particular window won't move or resize | Its app must expose the relevant Accessibility capability. Full-screen windows are skipped. |
 | Hover focus is unavailable | The private focus APIs aren't available on this macOS version. Moving and resizing remain independent of them. |

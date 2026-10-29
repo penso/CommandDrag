@@ -132,6 +132,13 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     NSMenuItem *status = [self item:state action:NULL];
     status.enabled = NO;
     [menu addItem:status];
+    if (!AXIsProcessTrusted()) {
+        // A grant left over from another build still looks enabled in System Settings but does not apply.
+        NSMenuItem *hint = [self item:@"Already enabled? Remove CommandDrag from the list and add it again."
+                               action:NULL];
+        hint.enabled = NO;
+        [menu addItem:hint];
+    }
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItem:[self item:(_enabled ? @"Pause" : @"Resume") action:@selector(toggleEnabled:)]];
     BOOL canFocus = FocusWithoutRaiseAvailable();
