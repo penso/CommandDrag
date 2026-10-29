@@ -3,8 +3,8 @@
 # Install the pinned tools with: pip install --require-hashes -r Scripts/lint-requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")/.."
-FILES=(Sources/main.m Sources/Focus.m Sources/Focus.h Scripts/generate-icon.m Scripts/generate-dmg-background.m)
-SOURCES=(Sources/main.m Sources/Focus.m Scripts/generate-icon.m Scripts/generate-dmg-background.m)
+FILES=(Sources/main.m Sources/Focus.m Sources/Focus.h Sources/Update.m Sources/Update.h Scripts/generate-icon.m Scripts/generate-dmg-background.m)
+SOURCES=(Sources/main.m Sources/Focus.m Sources/Update.m Scripts/generate-icon.m Scripts/generate-dmg-background.m)
 SDK="$(xcrun --show-sdk-path)"
 if [[ "${1:-}" == --fix ]]; then
   clang-format -i "${FILES[@]}"

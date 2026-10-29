@@ -28,8 +28,8 @@ A lightweight, native Objective-C menu-bar app for **macOS 13 and later**. Hold 
 - **⌘ + left-drag** to move a window, including background windows.
 - **⌘ + right-drag** to resize the nearest border or corner.
 - **Hover to focus, without raising:** rest the pointer over a window to send keyboard input there while keeping overlapping windows in place. Optional; no click or modifier needed.
-- Menu-bar controls for pause/resume, modifier selection, and launch at login.
-- Native Objective-C, no third-party runtime dependencies, and no network access.
+- Menu-bar controls for pause/resume, modifier selection, launch at login, and checking for updates.
+- Native Objective-C, no third-party runtime dependencies, and no network access unless you choose **Check for Updates…**.
 
 ## Screenshots
 
@@ -56,7 +56,7 @@ Download the **universal DMG for Apple Silicon and Intel** from [GitHub Releases
 3. Eject the disk image, then open **CommandDrag from Applications**.
 4. Grant Accessibility permission as described below.
 
-When updating, quit the running copy before replacing it. The app and DMG are **Developer ID signed and notarized by Apple**. A ZIP download is also available if you prefer to copy the app manually.
+To update, choose **Check for Updates…** in the menu: a newer DMG is downloaded to your Downloads folder and opened. Quit the running copy before replacing it. The app and DMG are **Developer ID signed and notarized by Apple**. A ZIP download is also available if you prefer to copy the app manually.
 
 ### Build from source
 
@@ -155,7 +155,7 @@ Each modifier-click logs the flags it saw, the element and app under the pointer
 - The selected modifier's normal click behavior is replaced over supported windows. Pause from the menu when you need that behavior, or select a different modifier.
 - Rebuilding an ad-hoc signed app can invalidate its Accessibility approval. If it stops working after an update, quit it, remove its entry in Privacy & Security, add the installed copy again, and reopen it.
 - Launch at login uses `SMAppService` (macOS 13+). Disable it before moving or deleting the app.
-- The app receives global mouse events to recognize gestures. It has no network or analytics code. Gesture diagnostics go to the unified log; per-click details are debug-level, kept in memory, and only visible while you stream them (see below).
+- The app receives global mouse events to recognize gestures. It has no analytics code and only connects to the network when you choose **Check for Updates…**, which asks GitHub for the latest release and, if you agree, downloads its DMG to your Downloads folder. Gesture diagnostics go to the unified log; per-click details are debug-level, kept in memory, and only visible while you stream them (see below).
 
 The default build is locally ad-hoc signed. For distribution, use a Developer ID identity (`SIGN_IDENTITY="Developer ID Application: …" bash build.sh`) and Apple's notarization process. This source package is not a notarized binary.
 
@@ -213,6 +213,7 @@ After installing and granting Accessibility permission:
 
 - `Sources/main.m`: menu, preferences, permissions, login item, hit-testing, and mouse handling.
 - `Sources/Focus.h`, `Sources/Focus.m`: dynamically resolved focus-without-raising support.
+- `Sources/Update.h`, `Sources/Update.m`: menu-driven check for the latest GitHub release and DMG download.
 - `Sources/Info.plist`: app bundle metadata.
 - `Sources/CommandDrag.icns`: app icon for Finder and System Settings.
 - `Scripts/generate-icon.m`: native, reproducible icon artwork generator.

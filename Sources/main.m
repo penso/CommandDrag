@@ -4,6 +4,7 @@
 #import <math.h>
 #import <os/log.h>
 #import "Focus.h"
+#import "Update.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate> {
     CFMachPortRef _tap;
@@ -25,6 +26,7 @@
 @property(nonatomic, strong) NSStatusItem *statusItem;
 @property(nonatomic, strong) NSTimer *permissionTimer;
 @property(nonatomic, strong) NSTimer *hoverTimer;
+@property(nonatomic, strong) Updater *updater;
 - (CGEventRef)handleEvent:(CGEventRef)event type:(CGEventType)type;
 @end
 
@@ -158,6 +160,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItem:[self item:@"Grant Accessibility…" action:@selector(requestAccessibility:)]];
     [menu addItem:[self item:@"Open Input Monitoring…" action:@selector(openInputMonitoring:)]];
+    [menu addItem:[self item:@"Check for Updates…" action:@selector(checkForUpdates:)]];
     [menu addItem:[self item:@"Quit CommandDrag" action:@selector(quit:)]];
     self.statusItem.menu = menu;
 }
@@ -460,6 +463,11 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
         [SMAppService openSystemSettingsLoginItems];
     }
     [self rebuildMenu];
+}
+- (void)checkForUpdates:(id)sender {
+    (void)sender;
+    if (!self.updater) self.updater = [[Updater alloc] init];
+    [self.updater checkForUpdates];
 }
 - (void)quit:(id)sender {
     (void)sender;

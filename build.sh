@@ -18,7 +18,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 xcrun clang @compile_flags.txt -Werror -O2 \
   "${ARCH_FLAGS[@]}" \
   -framework Cocoa -framework ApplicationServices -framework ServiceManagement \
-  Sources/main.m Sources/Focus.m -o "$APP/Contents/MacOS/CommandDrag"
+  Sources/main.m Sources/Focus.m Sources/Update.m -o "$APP/Contents/MacOS/CommandDrag"
 cp Sources/Info.plist "$APP/Contents/Info.plist"
 if [[ -n "${APP_VERSION:-}" ]]; then
   [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "APP_VERSION must be X.Y.Z" >&2; exit 1; }
