@@ -139,13 +139,23 @@ macOS has no public API for this Linux-style focus behavior. The implementation 
 | A particular window won't move or resize | Its app must expose the relevant Accessibility capability. Full-screen windows are skipped. |
 | Hover focus is unavailable | The private focus APIs aren't available on this macOS version. Moving and resizing remain independent of them. |
 
+### Diagnostic logs
+
+CommandDrag logs permission changes, event-tap state, and each gesture decision under the `local.commanddrag.app` subsystem. Stream them while reproducing a problem:
+
+```sh
+log stream --level debug --style compact --predicate 'subsystem == "local.commanddrag.app"'
+```
+
+Each modifier-click logs the flags it saw, the element and app under the pointer, and either `move started` or the reason the window was ignored. If a click logs nothing, the event tap is not receiving events: check Accessibility and Input Monitoring. Launch and error messages are also kept, so `log show --last 10m --predicate 'subsystem == "local.commanddrag.app"'` works after the fact.
+
 ### Compatibility and privacy
 
 - Some apps do not expose accessible windows or support setting their position/size. Full-screen windows are skipped. Secure system UI and locked sessions are outside the app's control.
 - The selected modifier's normal click behavior is replaced over supported windows. Pause from the menu when you need that behavior, or select a different modifier.
 - Rebuilding an ad-hoc signed app can invalidate its Accessibility approval. If it stops working after an update, quit it, remove its entry in Privacy & Security, add the installed copy again, and reopen it.
 - Launch at login uses `SMAppService` (macOS 13+). Disable it before moving or deleting the app.
-- The app receives global mouse events to recognize gestures. It has no network, analytics, or event logging code.
+- The app receives global mouse events to recognize gestures. It has no network or analytics code. Gesture diagnostics go to the unified log; per-click details are debug-level, kept in memory, and only visible while you stream them (see below).
 
 The default build is locally ad-hoc signed. For distribution, use a Developer ID identity (`SIGN_IDENTITY="Developer ID Application: …" bash build.sh`) and Apple's notarization process. This source package is not a notarized binary.
 

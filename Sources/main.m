@@ -2,6 +2,7 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <math.h>
+#import <os/log.h>
 #import "Focus.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate> {
@@ -32,6 +33,22 @@ static const float AXTimeout = 0.05f;
 static const CGEventFlags ModifierMask =
     kCGEventFlagMaskCommand | kCGEventFlagMaskAlternate | kCGEventFlagMaskControl | kCGEventFlagMaskShift;
 
+// Stream with: log stream --level debug --predicate 'subsystem == "local.commanddrag.app"'
+// Debug messages stay in memory unless streamed; nothing is persisted by default.
+static os_log_t Log(void) {
+    static os_log_t log;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ log = os_log_create("local.commanddrag.app", "gesture"); });
+    return log;
+}
+
+static NSString *DescribeApp(AXUIElementRef element) {
+    pid_t pid = 0;
+    if (AXUIElementGetPid(element, &pid) != kAXErrorSuccess) return @"unknown app";
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    return [NSString stringWithFormat:@"%@ (pid %d)", app.bundleIdentifier ?: app.localizedName ?: @"?", pid];
+}
+
 static CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
     (void)proxy;
     return [(__bridge AppDelegate *)context handleEvent:event type:type];
@@ -39,7 +56,11 @@ static CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type, CGEvent
 
 static BOOL ReadAXValue(AXUIElementRef element, CFStringRef attribute, AXValueType type, void *result) {
     CFTypeRef value = NULL;
-    if (AXUIElementCopyAttributeValue(element, attribute, &value) != kAXErrorSuccess || !value) return NO;
+    AXError error = AXUIElementCopyAttributeValue(element, attribute, &value);
+    if (error != kAXErrorSuccess || !value) {
+        os_log_debug(Log(), "read %{public}@ failed: AXError %d", (__bridge NSString *)attribute, (int)error);
+        return NO;
+    }
     BOOL valid = CFGetTypeID(value) == AXValueGetTypeID() && AXValueGetType((AXValueRef)value) == type &&
         AXValueGetValue((AXValueRef)value, type, result);
     CFRelease(value);
@@ -57,6 +78,9 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     if (!wrapped) return NO;
     AXError error = AXUIElementSetAttributeValue(element, attribute, wrapped);
     CFRelease(wrapped);
+    if (error != kAXErrorSuccess) {
+        os_log_error(Log(), "write %{public}@ failed: AXError %d", (__bridge NSString *)attribute, (int)error);
+    }
     return error == kAXErrorSuccess;
 }
 
@@ -75,6 +99,12 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     self.statusItem.button.title = @"↔";
     self.statusItem.button.toolTip = @"CommandDrag — modifier + left drag to move, right drag to resize";
+    NSDictionary *info = NSBundle.mainBundle.infoDictionary;
+    os_log(Log(),
+        "launch: version %{public}@ (%{public}@), path %{public}@, trusted %d, modifier 0x%llx, "
+        "focusFollowsMouse %d, focusAvailable %d",
+        info[@"CFBundleShortVersionString"], info[@"CFBundleVersion"], NSBundle.mainBundle.bundlePath, _trusted,
+        (unsigned long long)_modifier, _focusFollowsMouse, FocusWithoutRaiseAvailable());
     [self rebuildMenu];
     [self startTap];
     self.permissionTimer = [NSTimer scheduledTimerWithTimeInterval:2
@@ -133,7 +163,11 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
 }
 
 - (void)startTap {
-    if (_tap || !AXIsProcessTrusted()) return;
+    if (_tap) return;
+    if (!AXIsProcessTrusted()) {
+        os_log_debug(Log(), "event tap not started: Accessibility permission missing");
+        return;
+    }
     CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventLeftMouseUp) |
         CGEventMaskBit(kCGEventLeftMouseDragged) | CGEventMaskBit(kCGEventRightMouseDown) |
         CGEventMaskBit(kCGEventRightMouseUp) | CGEventMaskBit(kCGEventRightMouseDragged) |
@@ -144,6 +178,9 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
         _tapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _tap, 0);
         CFRunLoopAddSource(CFRunLoopGetMain(), _tapSource, kCFRunLoopCommonModes);
         CGEventTapEnable(_tap, true);
+        os_log(Log(), "event tap started");
+    } else {
+        os_log_error(Log(), "event tap creation failed: check Input Monitoring permission");
     }
     [self rebuildMenu];
 }
@@ -153,6 +190,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     BOOL trusted = AXIsProcessTrusted() ? YES : NO;
     BOOL changed = trusted != _trusted;
     _trusted = trusted;
+    if (changed) os_log(Log(), "Accessibility permission %{public}s", trusted ? "granted" : "revoked");
     if (!_tap) [self startTap];
     if (!trusted) [self finishDrag];
     if (changed) [self rebuildMenu];
@@ -216,16 +254,22 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     AXUIElementRef hit = NULL;
     AXError error = AXUIElementCopyElementAtPosition(system, (float)point.x, (float)point.y, &hit);
     CFRelease(system);
-    if (error != kAXErrorSuccess || !hit) return NULL;
+    if (error != kAXErrorSuccess || !hit) {
+        os_log_debug(Log(), "no element at (%.0f, %.0f): AXError %d", point.x, point.y, (int)error);
+        return NULL;
+    }
     AXUIElementSetMessagingTimeout(hit, AXTimeout);
     CFTypeRef role = NULL;
     AXUIElementCopyAttributeValue(hit, kAXRoleAttribute, &role);
     BOOL isWindow = role && CFEqual(role, kAXWindowRole);
+    os_log_debug(Log(), "element at (%.0f, %.0f): role %{public}@ in %{public}@", point.x, point.y,
+        role ? (__bridge NSString *)role : @"none", DescribeApp(hit));
     if (role) CFRelease(role);
     if (isWindow) return hit;
     CFTypeRef window = NULL;
-    AXUIElementCopyAttributeValue(hit, kAXWindowAttribute, &window);
+    error = AXUIElementCopyAttributeValue(hit, kAXWindowAttribute, &window);
     CFRelease(hit);
+    if (!window) os_log_debug(Log(), "element has no AXWindow: AXError %d", (int)error);
     if (window && CFGetTypeID(window) != AXUIElementGetTypeID()) {
         CFRelease(window);
         return NULL;
@@ -235,6 +279,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
 
 - (CGEventRef)handleEvent:(CGEventRef)event type:(CGEventType)type {
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        os_log_error(Log(), "event tap disabled by %{public}s; re-enabling",
+            type == kCGEventTapDisabledByTimeout ? "timeout" : "user input");
         [self cancelHover];
         [self finishDrag];
         if (_tap) CGEventTapEnable(_tap, true);
@@ -265,10 +311,14 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     BOOL right = type == kCGEventRightMouseDown || type == kCGEventRightMouseDragged || type == kCGEventRightMouseUp;
     CGPoint point = CGEventGetLocation(event); // AX and CG both use global, top-left coordinates.
     // A fresh down means the previous up was lost while the tap was disabled.
-    if (_dragging && right == _resizing && down && !_window) _dragging = NO;
+    if (_dragging && right == _resizing && down && !_window) {
+        os_log_debug(Log(), "dropping stale gesture: its mouse-up was lost");
+        _dragging = NO;
+    }
     if (_dragging) {
         if (right != _resizing) return event;
         if (up) {
+            os_log_debug(Log(), "%{public}s ended", _resizing ? "resize" : "move");
             [self finishDrag];
             _dragging = NO;
             return NULL;
@@ -301,9 +351,21 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
         }
         return NULL;
     }
-    if (!_enabled || !down || (CGEventGetFlags(event) & ModifierMask) != _modifier) return event;
+    if (!down) return event;
+    CGEventFlags flags = CGEventGetFlags(event);
+    os_log_debug(Log(), "%{public}s mouse down at (%.0f, %.0f): flags 0x%llx, modifiers 0x%llx, expected 0x%llx",
+        right ? "right" : "left", point.x, point.y, (unsigned long long)flags,
+        (unsigned long long)(flags & ModifierMask), (unsigned long long)_modifier);
+    if (!_enabled) {
+        os_log_debug(Log(), "ignored: paused");
+        return event;
+    }
+    if ((flags & ModifierMask) != _modifier) return event;
     AXUIElementRef window = [self copyWindowAtPoint:point];
-    if (!window) return event;
+    if (!window) {
+        os_log(Log(), "ignored: no Accessibility window under the pointer");
+        return event;
+    }
     AXUIElementSetMessagingTimeout(window, AXTimeout);
     CFTypeRef fullscreen = NULL;
     AXUIElementCopyAttributeValue(window, CFSTR("AXFullScreen"), &fullscreen);
@@ -315,6 +377,9 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     CGSize size;
     if (isFullscreen || !settable || !ReadAXValue(window, kAXPositionAttribute, kAXValueTypeCGPoint, &position) ||
         !ReadAXValue(window, kAXSizeAttribute, kAXValueTypeCGSize, &size)) {
+        // When neither flag explains it, reading the window frame failed.
+        os_log(Log(), "ignored window in %{public}@: fullscreen %d, %{public}s settable %d", DescribeApp(window),
+            isFullscreen, right ? "size" : "position", settable);
         CFRelease(window);
         return event;
     }
@@ -331,6 +396,7 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
             Boolean movable = false;
             AXUIElementIsAttributeSettable(window, kAXPositionAttribute, &movable);
             if (!movable) {
+                os_log(Log(), "ignored resize in %{public}@: position not settable", DescribeApp(window));
                 CFRelease(window);
                 return event;
             }
@@ -342,6 +408,8 @@ static BOOL WriteAXValue(AXUIElementRef element, CFStringRef attribute, AXValueT
     _mouseStart = point;
     _resizing = right;
     _dragging = YES;
+    os_log(Log(), "%{public}s started in %{public}@: frame (%.0f, %.0f, %.0f x %.0f)", right ? "resize" : "move",
+        DescribeApp(window), position.x, position.y, size.width, size.height);
     // Do not activate the app: the gesture also works on background windows.
     return NULL;
 }
